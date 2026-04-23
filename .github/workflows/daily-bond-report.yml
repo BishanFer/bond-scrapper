@@ -62,7 +62,7 @@ jobs:
           git push
       
       - name: Send email
-        if: steps.check_output.outputs.exists == 'true' && secrets.RESEND_API_KEY != ''
+        if: steps.check_output.outputs.exists == 'true'
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
