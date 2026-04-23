@@ -26,7 +26,7 @@ with open(latest_file, "rb") as f:
     file_b64 = base64.b64encode(f.read()).decode()
 
 today = datetime.now().strftime("%Y-%m-%d")
-from_email = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
+from_email = os.environ.get("FROM_EMAIL") or "onboarding@resend.dev"
 
 payload = {
     "from": from_email,
