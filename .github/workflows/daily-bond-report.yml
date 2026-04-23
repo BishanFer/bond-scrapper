@@ -2,8 +2,8 @@ name: Daily Treasury Bond Report
 
 on:
   schedule:
-    # Run daily at 6:00 PM Sri Lanka Time (12:30 UTC)
-    - cron: '30 12 * * *'
+    # Run daily at 8:00 AM Sri Lanka Time (02:30 UTC)
+    - cron: '30 2 * * *'
   workflow_dispatch:
     # Allow manual trigger
 
