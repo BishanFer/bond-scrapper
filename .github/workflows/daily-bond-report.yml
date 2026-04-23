@@ -2,8 +2,8 @@ name: Daily Treasury Bond Report
 
 on:
   schedule:
-    # Run daily at 8:00 AM Sri Lanka Time (02:30 UTC)
-    - cron: '30 2 * * *'
+    # Run daily at 6:00 PM Sri Lanka Time (12:30 UTC)
+    - cron: '30 12 * * *'
   workflow_dispatch:
     # Allow manual trigger
 
@@ -11,10 +11,14 @@ jobs:
   fetch-and-email:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write  # Needed to commit reports back
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -23,47 +27,73 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install xlrd openpyxl requests
+          pip install -e .
       
-      - name: Run the scraper
+      - name: Run scraper (incremental)
         run: |
-          python extract_data.py --year 2025 --month 12
-        env:
-          REPORTS_DIR: treasury_reports
-          OUTPUT_FILE: treasury_bond_yields.xlsx
+          python extract_data.py --incremental --output output/treasury_bond_yields.xlsx
         continue-on-error: true
       
-      - name: List files
+      - name: Check output
+        id: check_output
         run: |
-          echo "=== Reports directory ==="
-          ls -la treasury_reports/ || echo "No reports dir"
-          echo ""
-          echo "=== Current directory ==="
-          ls -la
-      
-      - name: Check if Excel was created
-        id: check_excel
-        run: |
-          if [ -f "treasury_bond_yields.xlsx" ]; then
-            echo "excel_exists=true" >> $GITHUB_OUTPUT
-            ls -la treasury_bond_yields.xlsx
+          if [ -f "output/treasury_bond_yields.xlsx" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            ls -lh output/treasury_bond_yields.xlsx
           else
-            echo "excel_exists=false" >> $GITHUB_OUTPUT
-            echo "Excel file not found"
+            echo "exists=false" >> $GITHUB_OUTPUT
           fi
       
-      - name: Upload Excel as artifact
-        if: steps.check_excel.outputs.excel_exists == 'true'
+      - name: Upload artifact
+        if: steps.check_output.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: treasury-report
-          path: treasury_bond_yields.xlsx
+          path: output/treasury_bond_yields.xlsx
           retention-days: 30
       
-      - name: Send email with attachment
-        if: steps.check_excel.outputs.excel_exists == 'true'
+      - name: Commit report to repo
+        if: steps.check_output.outputs.exists == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add output/
+          git diff --staged --quiet || git commit -m "Update treasury bond yields - $(date +%Y-%m-%d)"
+          git push
+      
+      - name: Send email
+        if: steps.check_output.outputs.exists == 'true' && secrets.RESEND_API_KEY != ''
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
-        run: python send_email.py
+        run: |
+          cat > send_email.py << 'EOF'
+          import os
+          import sys
+          from datetime import datetime
+          from pathlib import Path
+          from extract_data import EmailSender
+
+          api_key = os.environ.get("RESEND_API_KEY", "")
+          to_email = os.environ.get("TO_EMAIL", "")
+          from_email = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
+
+          if not api_key or not to_email:
+              print("Missing email configuration")
+              sys.exit(0)
+
+          sender = EmailSender(api_key, from_email, to_email)
+          excel_path = Path("output/treasury_bond_yields.xlsx")
+          
+          stats = {
+              "twoway_count": 0,
+              "ddo_count": 0,
+              "total_dates": 0,
+              "issues": []
+          }
+
+          success = sender.send_report(excel_path, datetime.now(), stats)
+          sys.exit(0 if success else 1)
+          EOF
+          python send_email.py
