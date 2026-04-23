@@ -58,20 +58,17 @@ jobs:
       - name: Send email with attachment
         if: steps.check_files.outputs.new_report == 'true'
         env:
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
         run: |
-          if [ -n "$SENDGRID_API_KEY" ]; then
+          if [ -n "$RESEND_API_KEY" ]; then
             python -c "
             import os
-            import subprocess
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            from email.mime.base import MIMEBase
-            from email import encoders
+            import glob
+            from datetime import datetime
             
             # Find the latest Excel file
-            import glob
             files = glob.glob('treasury_bond_yields_*.xlsx')
             if not files:
                 print('No Excel file found')
@@ -80,49 +77,44 @@ jobs:
             latest_file = max(files, key=os.path.getmtime)
             print(f'Attaching: {latest_file}')
             
-            # Send email via SendGrid
-            import requests
-            
-            today = datetime.now().strftime('%Y-%m-%d')
-            subject = f'Treasury Bond Yields - {today}'
-            body = f'Please find attached the Treasury Bond Yields report for {today}.'
-            
             # Read file
             with open(latest_file, 'rb') as f:
                 file_data = f.read()
             
-            # Using SendGrid API
-            url = 'https://api.sendgrid.com/v3/mail/send'
-            headers = {
-                'Authorization': f'Bearer $SENDGRID_API_KEY',
-                'Content-Type': 'application/json'
-            }
-            
-            # Convert to base64
             import base64
             file_b64 = base64.b64encode(file_data).decode()
             
+            today = datetime.now().strftime('%Y-%m-%d')
+            subject = f'Treasury Bond Yields - {today}'
+            
+            to_email = os.environ.get('TO_EMAIL', '')
+            from_email = os.environ.get('FROM_EMAIL', 'reports@resend.dev')
+            
+            # Send via Resend API
+            import requests
+            
+            url = 'https://api.resend.com/emails'
+            headers = {
+                'Authorization': f'Bearer {os.environ.get(\"RESEND_API_KEY\")}',
+                'Content-Type': 'application/json'
+            }
+            
             payload = {
-                'personalizations': [{
-                    'to': [{'email': os.environ.get('TO_EMAIL', '')}]
-                }],
-                'from': {'email': 'reports@bond-scrapper.treasury'},
+                'from': from_email,
+                'to': [to_email],
                 'subject': subject,
-                'attachments': [{
-                    'content': file_b64,
-                    'filename': latest_file,
-                    'type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    'disposition': 'attachment'
-                }],
-                'content': [{
-                    'type': 'text/plain',
-                    'value': body
-                }]
+                'html': f'<p>Please find attached the Treasury Bond Yields report for {today}.</p>',
+                'attachments': [
+                    {
+                        'filename': latest_file,
+                        'content': file_b64
+                    }
+                ]
             }
             
             try:
                 r = requests.post(url, headers=headers, json=payload)
-                if r.status_code in [200, 202, 201]:
+                if r.status_code in [200, 201, 202]:
                     print('Email sent successfully')
                 else:
                     print(f'Email failed: {r.status_code} - {r.text}')
@@ -130,5 +122,5 @@ jobs:
                 print(f'Email error: {e}')
             "
           else
-            echo "SendGrid not configured, skipping email"
+            echo "Resend not configured, skipping email"
           fi
