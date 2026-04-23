@@ -10,82 +10,78 @@ on:
 jobs:
   fetch-and-email:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
       
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install xlrd openpyxl requests
       
-      - name: Fetch today's report
-        run: python extract_data.py --today
+      - name: Run the scraper
+        run: |
+          python extract_data.py --year 2025 --month 12
         env:
           REPORTS_DIR: treasury_reports
+          OUTPUT_FILE: treasury_bond_yields.xlsx
+        continue-on-error: true
       
-      - name: Check if new report was downloaded
-        id: check_files
+      - name: List downloaded files
         run: |
-          ls -la treasury_reports/
-          if ls treasury_reports/report_$(date +%d-%m-%Y).xlsx 2>/dev/null; then
-            echo "new_report=true" >> $GITHUB_OUTPUT
+          ls -la treasury_reports/ || echo "No reports directory"
+      
+      - name: Check if Excel was created
+        id: check_excel
+        run: |
+          if [ -f "treasury_bond_yields.xlsx" ]; then
+            echo "excel_exists=true" >> $GITHUB_OUTPUT
+            ls -la treasury_bond_yields.xlsx
           else
-            echo "new_report=false" >> $GITHUB_OUTPUT
+            echo "excel_exists=false" >> $GITHUB_OUTPUT
           fi
       
-      - name: Run full export if needed
-        if: steps.check_files.outputs.new_report == 'true'
-        run: |
-          python extract_data.py --year $(date +%Y) --month $(date +%-m)
-        env:
-          REPORTS_DIR: treasury_reports
-          OUTPUT_FILE: treasury_bond_yields_$(date +%Y%m%d).xlsx
-      
       - name: Upload Excel as artifact
-        if: steps.check_files.outputs.new_report == 'true'
+        if: steps.check_excel.outputs.excel_exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: treasury-report
-          path: treasury_bond_yields_*.xlsx
+          path: treasury_bond_yields.xlsx
           retention-days: 30
       
       - name: Send email with attachment
-        if: steps.check_files.outputs.new_report == 'true'
+        if: steps.check_excel.outputs.excel_exists == 'true'
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
         run: |
+          echo "RESEND_API_KEY set: ${{ secrets.RESEND_API_KEY != '' }}"
+          echo "TO_EMAIL set: ${{ secrets.TO_EMAIL != '' }}"
+          
           if [ -n "$RESEND_API_KEY" ]; then
             python -c "
             import os
-            import glob
+            import base64
             from datetime import datetime
+            import requests
             
-            # Find the latest Excel file
-            files = glob.glob('treasury_bond_yields_*.xlsx')
-            if not files:
+            latest_file = 'treasury_bond_yields.xlsx'
+            if not os.path.exists(latest_file):
                 print('No Excel file found')
                 exit(0)
             
-            latest_file = max(files, key=os.path.getmtime)
             print(f'Attaching: {latest_file}')
             
-            # Read file
             with open(latest_file, 'rb') as f:
                 file_data = f.read()
             
-            import base64
             file_b64 = base64.b64encode(file_data).decode()
             
             today = datetime.now().strftime('%Y-%m-%d')
@@ -93,9 +89,6 @@ jobs:
             
             to_email = os.environ.get('TO_EMAIL', '')
             from_email = os.environ.get('FROM_EMAIL', 'onboarding@resend.dev')
-            
-            # Send via Resend API
-            import requests
             
             url = 'https://api.resend.com/emails'
             headers = {
@@ -116,15 +109,17 @@ jobs:
                 ]
             }
             
-            try:
-                r = requests.post(url, headers=headers, json=payload)
-                if r.status_code in [200, 201, 202]:
-                    print('Email sent successfully')
-                else:
-                    print(f'Email failed: {r.status_code} - {r.text}')
-            except Exception as e:
-                print(f'Email error: {e}')
-            "
+            print(f'Sending to: {to_email}')
+            print(f'From: {from_email}')
+            
+            r = requests.post(url, headers=headers, json=payload)
+            print(f'Response: {r.status_code}')
+            print(f'Body: {r.text}')
+            
+            if r.status_code in [200, 201, 202]:
+                print('Email sent successfully')
+            else:
+                print(f'Email failed: {r.status_code}')
           else
             echo "Resend not configured, skipping email"
           fi
