@@ -33,9 +33,13 @@ jobs:
           OUTPUT_FILE: treasury_bond_yields.xlsx
         continue-on-error: true
       
-      - name: List downloaded files
+      - name: List files
         run: |
-          ls -la treasury_reports/ || echo "No reports directory"
+          echo "=== Reports directory ==="
+          ls -la treasury_reports/ || echo "No reports dir"
+          echo ""
+          echo "=== Current directory ==="
+          ls -la
       
       - name: Check if Excel was created
         id: check_excel
@@ -45,6 +49,7 @@ jobs:
             ls -la treasury_bond_yields.xlsx
           else
             echo "excel_exists=false" >> $GITHUB_OUTPUT
+            echo "Excel file not found"
           fi
       
       - name: Upload Excel as artifact
@@ -62,9 +67,6 @@ jobs:
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
         run: |
-          echo "RESEND_API_KEY set: ${{ secrets.RESEND_API_KEY != '' }}"
-          echo "TO_EMAIL set: ${{ secrets.TO_EMAIL != '' }}"
-          
           if [ -n "$RESEND_API_KEY" ]; then
             python -c "
             import os
