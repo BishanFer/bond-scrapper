@@ -10,6 +10,8 @@ on:
 jobs:
   fetch-and-email:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
       - name: Checkout code
@@ -88,7 +90,7 @@ jobs:
             subject = f'Treasury Bond Yields - {today}'
             
             to_email = os.environ.get('TO_EMAIL', '')
-            from_email = os.environ.get('FROM_EMAIL', 'reports@resend.dev')
+            from_email = os.environ.get('FROM_EMAIL', 'onboarding@resend.dev')
             
             # Send via Resend API
             import requests
